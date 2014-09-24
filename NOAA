@@ -1,0 +1,130 @@
+#Analysis of severe weather events in the United States based on NOAA Storm Database
+====================
+
+##Synopsis: Immediately after the title, there should be a synopsis which describes and summarizes your analysis in at most 10 complete sentences.
+
+##Data Processing: section titled Data Processing which describes (in words and code) how the data were loaded into R and processed for analysis. In particular, your analysis must start from the raw CSV file containing the data. You cannot do any preprocessing outside the document. 
+
+Info on data:  This database tracks characteristics of major storms and weather events in the United States, including when and where they occur, as well as estimates of any fatalities, injuries, and property damage.The events in the database start in the year 1950 and end in November 2011.
+
+###Reading the data
+
+Before reading the data make sure that the data required for this assigment is located in your working directory. The following will read directly the bzipped file.
+
+```{r}
+data <- read.csv(bzfile("repdata-data-StormData.csv.bz2"))
+
+```
+
+
+Before proceeding further with the data an initial check on the size, structure, results summaries of results in the data is made. 
+
+```{r}
+summary(data)
+names(data)
+```
+
+Based on the above we can decide which part of data is relevent to us and extract the columns that will help answer the question which weather event type is the most harmful to population health -> h_data. 
+
+```{r}
+h_data <- data[c("EVTYPE", "FATALITIES", "INJURIES")]
+h_data$EVTYPE <- toupper(h_data$EVTYPE)
+h_data <- aggregate(x = data.frame(h_data$FATALITIES, h_data$INJURIES), by = list(h_data$EVTYPE), FUN = "sum")
+names(h_data) <- c("EVTYPE", "FATALITIES", "INJURIES")
+```
+
+And data relevant to the second question i.e. which types of events have the greatest economic consequences -> e_data. The extacted variables are "EVTYPE" => Event Type, "PROPDMG" => Property Damage, "PROPDMGEXP" => Multiplayer "K", "M" or "B", "CROPDMG" => Crop Damage, "CROPDMGEXP" => Multiplayer "K", "M" or "B".
+
+```{r}
+e_data <- data[c("EVTYPE", "PROPDMG", "PROPDMGEXP", "CROPDMG", "CROPDMGEXP")]
+e_data$EVTYPE <- toupper(e_data$EVTYPE)
+
+##Exchange multiplayer with a peroper value i.e. "K" => 1000, "M" =>  1000000 and "B" => 1000000000
+e_data$PROPDMGEXP <- as.character(e_data$PROPDMGEXP)
+e_data$PROPDMGEXP[e_data$PROPDMGEXP %in% c("K","k")] <- "1000"
+e_data$PROPDMGEXP[e_data$PROPDMGEXP %in% c("M", "m")] <- "1000000"
+e_data$PROPDMGEXP[e_data$PROPDMGEXP %in% c("B", "b")] <- "1000000000"
+
+e_data$CROPDMGEXP <- as.character(e_data$CROPDMGEXP)
+e_data$CROPDMGEXP[e_data$CROPDMGEXP %in% c("K","k")] <- "1000"
+e_data$CROPDMGEXP[e_data$CROPDMGEXP %in% c("M", "m")] <- "1000000"
+e_data$CROPDMGEXP[e_data$CROPDMGEXP %in% c("B", "b")] <- "1000000000"
+
+e_data$PROPDMGEXP <- as.numeric(as.character(e_data$PROPDMGEXP))
+e_data$CROPDMGEXP <- as.numeric(as.character(e_data$CROPDMGEXP))
+
+##Multiply the property and crop damage values by their corresponding multipliers
+
+e_data$PROPDMG <- e_data$PROPDMG * e_data$PROPDMGEXP
+e_data$CROPDMG <- e_data$CROPDMG * e_data$CROPDMGEXP
+
+##Dropping the multiplier columns
+e_data <- e_data <- e_data[c(-3, -5)]
+
+##Prepare data for plotting
+
+e_data <- aggregate(x = data.frame(e_data$PROPDMG, e_data$CROPDMG), by = list(e_data$EVTYPE), FUN = "sum") 
+
+names(e_data) <- c("EVTYPE", "PROPDMG", "CROPDMG")
+```
+
+Next we check the distribution fo both data sets:
+
+```{r}
+summary(h_data)
+quantile(h_data$FATALITIES, na.rm = TRUE)
+quantile(h_data$INJURIES, na.rm = TRUE)
+
+summary(e_data)
+quantile(e_data$PROPDMG, na.rm = TRUE)
+quantile(e_data$CROPDMG, na.rm = TRUE)
+
+```
+
+Based on the results above we concentrate on the data in : 
+
+```{r}
+nh_data <- h_data[which(h_data$FATALITIES > quantile(h_data$FATALITIES, 0.95) & h_data$INJURIES > quantile(h_data$INJURIES, 0.95)),]
+
+library(reshape)
+h_mdata <- melt(nh_data, id = "EVTYPE")
+```
+
+Similar is done with the e_data
+
+```{r}
+ne_data <- e_data[which(e_data$PROPDMG > quantile(e_data$PROPDMG, 0.95) & e_data$CROPDMG > quantile(e_data$CROPDMG, 0.95)),]
+
+e_mdata <- melt(ne_data, id = "EVTYPE")
+
+```
+
+Build a graph
+
+```{r}
+library(ggplot2)
+
+##Colour pallete to use for the plotting:
+cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+
+g <- ggplot(data = h_mdata, aes(x = factor(EVTYPE), y = value, fill = factor(variable)) 
++ geom_bar(position="stack", stat="identity", binwidth=.5, alpha=.5) 
++ theme(axis.text.x  = element_text(angle=90, size=8), axis.title.x = element_text(size = 9, colour = 'black'),axis.title.y = element_text(size = 9, colour = 'black')) 
++ scale_fill_manual(values=cbPalette)
++ xlab("Weather Event") +
+  ylab("Total Damage Value") +
+  ggtitle("Weather events vs health harm in population")
+```
+
+Display the 5 top health harm weather events:
+
+```{r}
+h_data$TOTAL <- as.numeric(h_data$INJURIES) + as.numeric(h_data$FATALITIES)
+top_hh <- h_data[c("EVTYPE", "TOTAL")]
+##Top 5 most health harmful weather events
+
+head(top_hh[order(-top_hh$TOTAL),], 5)
+
+```
+
